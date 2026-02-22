@@ -1,0 +1,169 @@
+// ─── CIE Dashboard — Prisma Schema ──────────────────────────────────
+//
+// Maps to Supabase (PostgreSQL). Includes the original requirement tables
+// plus meeting_notes and oneone_prep for the 1:1 section.
+//
+// Run: npx prisma db push  (to sync to Supabase)
+// Run: npx prisma generate (to generate the client)
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL") // Supabase connection pooling
+}
+
+// ─── Team ───────────────────────────────────────────────────────────
+
+model TeamMember {
+  id        String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name      String
+  email     String   @unique
+  slackId   String?  @map("slack_id")
+  role      String?
+  viewScope String   @default("team") @map("view_scope")
+  avatarUrl String?  @map("avatar_url")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
+
+  workItems    WorkItem[]
+  adhocUpdates AdhocUpdate[]
+  meetingNotes MeetingNote[] @relation("MeetingNoteMember")
+  managedNotes MeetingNote[] @relation("MeetingNoteManager")
+  preps        OneOnePrep[]
+
+  @@map("team_members")
+}
+
+// ─── Customers ──────────────────────────────────────────────────────
+
+model Customer {
+  id               String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  name             String
+  jiraInstanceUrl  String?  @map("jira_instance_url")
+  vaultSecretId    String?  @map("vault_secret_id") @db.Uuid
+  connectionStatus String   @default("pending") @map("connection_status")
+  createdAt        DateTime @default(now()) @map("created_at")
+  updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
+
+  workItems    WorkItem[]
+  adhocUpdates AdhocUpdate[]
+
+  @@map("customers")
+}
+
+// ─── Work Items (unified across all sources) ────────────────────────
+
+model WorkItem {
+  id                 String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source             String
+  sourceId           String   @map("source_id")
+  sourceUrl          String?  @map("source_url")
+  teamMemberId       String?  @map("team_member_id") @db.Uuid
+  customerId         String?  @map("customer_id") @db.Uuid
+  title              String
+  description        String?
+  status             String?
+  priority           String?
+  isBlocker          Boolean  @default(false) @map("is_blocker")
+  blockerDescription String?  @map("blocker_description")
+  rawData            Json?    @map("raw_data")
+  createdAt          DateTime @default(now()) @map("created_at")
+  updatedAt          DateTime @default(now()) @updatedAt @map("updated_at")
+  syncedAt           DateTime @default(now()) @map("synced_at")
+
+  teamMember TeamMember? @relation(fields: [teamMemberId], references: [id])
+  customer   Customer?   @relation(fields: [customerId], references: [id])
+
+  @@unique([source, sourceId])
+  @@map("work_items")
+}
+
+// ─── Ad Hoc Updates ─────────────────────────────────────────────────
+
+model AdhocUpdate {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  teamMemberId String   @map("team_member_id") @db.Uuid
+  customerId   String?  @map("customer_id") @db.Uuid
+  content      String
+  source       String
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  teamMember TeamMember @relation(fields: [teamMemberId], references: [id])
+  customer   Customer?  @relation(fields: [customerId], references: [id])
+
+  @@map("adhoc_updates")
+}
+
+// ─── AI Summaries ───────────────────────────────────────────────────
+
+model AiSummary {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  scope           String
+  scopeId         String?  @map("scope_id") @db.Uuid
+  summaryText     String?  @map("summary_text")
+  recommendations Json?
+  generatedAt     DateTime @default(now()) @map("generated_at")
+
+  @@map("ai_summaries")
+}
+
+// ─── Sync Jobs ──────────────────────────────────────────────────────
+
+model SyncJob {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  source        String
+  sourceConfig  Json?     @map("source_config")
+  status        String    @default("idle")
+  lastRunAt     DateTime? @map("last_run_at")
+  nextRunAt     DateTime? @map("next_run_at")
+  lastError     String?   @map("last_error")
+  runIntervalMs Int       @default(300000) @map("run_interval_ms")
+  createdAt     DateTime  @default(now()) @map("created_at")
+
+  @@map("sync_jobs")
+}
+
+// ─── 1:1 Meeting Notes ──────────────────────────────────────────────
+
+model MeetingNote {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  teamMemberId String   @map("team_member_id") @db.Uuid
+  managerId    String   @map("manager_id") @db.Uuid
+  title        String
+  source       String   // "granola" | "obsidian" | "manual"
+  sourceId     String?  @map("source_id")
+  sourceUrl    String?  @map("source_url")
+  meetingDate  DateTime @map("meeting_date")
+  summary      String?
+  actionItems  Json?    @map("action_items") // [{text, assignee, done}]
+  keyTopics    Json?    @map("key_topics")   // string[]
+  rawContent   String?  @map("raw_content")
+  createdAt    DateTime @default(now()) @map("created_at")
+  syncedAt     DateTime @default(now()) @map("synced_at")
+
+  teamMember TeamMember @relation("MeetingNoteMember", fields: [teamMemberId], references: [id])
+  manager    TeamMember @relation("MeetingNoteManager", fields: [managerId], references: [id])
+
+  @@unique([source, sourceId])
+  @@map("meeting_notes")
+}
+
+// ─── 1:1 Prep Context (AI-generated) ───────────────────────────────
+
+model OneOnePrep {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  teamMemberId  String   @map("team_member_id") @db.Uuid
+  generatedAt   DateTime @default(now()) @map("generated_at")
+  talkingPoints Json?    @map("talking_points") // suggested topics
+  openActions   Json?    @map("open_actions")   // unresolved from prior 1:1s
+  workContext   Json?    @map("work_context")   // current items, blockers
+  expiresAt     DateTime? @map("expires_at")
+
+  teamMember TeamMember @relation(fields: [teamMemberId], references: [id])
+
+  @@map("oneone_prep")
+}

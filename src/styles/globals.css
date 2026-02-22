@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --viax-bg: #F8F7F6;
+  --viax-green: #90E9B8;
+  --viax-green-dark: #5CC98A;
+  --viax-dark: #2A2A2A;
+  --viax-copy: #1E1E1E;
+  --viax-muted: #71717A;
+  --viax-border: #E4E4E7;
+  --viax-card: #FFFFFF;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--viax-bg);
+  color: var(--viax-copy);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
