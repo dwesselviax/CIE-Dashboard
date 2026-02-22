@@ -1,6 +1,9 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
+import { useRouter } from "next/navigation";
+import type { User } from "@supabase/supabase-js";
 import {
   Users,
   AlertTriangle,
@@ -19,6 +22,7 @@ import {
   Search,
   LayoutDashboard,
   Lock,
+  LogOut,
 } from "lucide-react";
 
 // ─── viax Design Tokens ─────────────────────────────────────────────
@@ -640,6 +644,19 @@ const NAV = [
 export default function Page() {
   const [page, setPage] = useState("dashboard");
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [user, setUser] = useState<User | null>(null);
+  const router = useRouter();
+
+  useEffect(() => {
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data }) => setUser(data.user));
+  }, []);
+
+  const handleSignOut = async () => {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/login");
+  };
 
   const navigate = (p: string, id?: string) => {
     setPage(p);
@@ -712,8 +729,19 @@ export default function Page() {
             </div>
           ))}
         </nav>
-        <div style={{ padding: "16px 20px", borderTop: "1px solid #3a3a3a", fontSize: 11, color: "#666" }}>
-          Prototype · Mock Data
+        <div style={{ padding: "12px 16px", borderTop: "1px solid #3a3a3a" }}>
+          {user ? (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+              <div style={{ fontSize: 11, color: "#999", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1, marginRight: 8 }}>
+                {user.email}
+              </div>
+              <button onClick={handleSignOut} style={{ background: "none", border: "none", color: "#666", cursor: "pointer", padding: 4, display: "flex", alignItems: "center" }} title="Sign out">
+                <LogOut size={14} />
+              </button>
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: "#666" }}>Loading...</div>
+          )}
         </div>
       </aside>
       <main style={styles.main}>{renderPage()}</main>
