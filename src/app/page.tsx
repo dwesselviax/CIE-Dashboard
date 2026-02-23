@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
@@ -66,9 +66,15 @@ type WorkItemDB = {
 };
 type CustomerDB = { id: string; name: string; connectionStatus: string };
 
+type CustomerTag = { name: string; percentage: number | null };
+
 type TeamMember = {
   id: string; name: string; email: string; role: string;
-  avatar: string; customers: string[]; oneOnOneCount: number;
+  avatar: string; customers: CustomerTag[]; oneOnOneCount: number;
+};
+
+type MemberCustomerAssignment = {
+  teamMemberId: string; customerId: string; customerName: string; percentage: number | null;
 };
 
 type MeetingNoteItem = {
@@ -435,7 +441,7 @@ function DashboardView({ onNavigate, scope = "team", team: allTeam, memberScope,
                 </div>
               </div>
               <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
-                {m.customers.map((c, i) => <span key={i} style={styles.tag}>{c}</span>)}
+                {m.customers.map((c, i) => <span key={i} style={styles.tag}>{c.name}{c.percentage != null ? ` (${c.percentage}%)` : ""}</span>)}
               </div>
               <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, color: V.muted }}>
                 <span>{activeCount} active · {items.length} total</span>
@@ -449,11 +455,15 @@ function DashboardView({ onNavigate, scope = "team", team: allTeam, memberScope,
   );
 }
 
-function MemberDetailPage({ memberId, onNavigate, team, memberScope, meetingNotes, workItems, customers, onWorkItemUpdate, onWorkItemCreate }: { memberId: string; onNavigate: (page: string, id?: string) => void; team: TeamMember[]; memberScope: Record<string, ViewScope>; meetingNotes: MeetingNoteItem[]; workItems: WorkItemDB[]; customers: CustomerDB[]; onWorkItemUpdate: (id: string, patch: Record<string, unknown>) => void; onWorkItemCreate: (memberId: string, fields: { title: string; customerId?: string | null; priority?: string }) => void }) {
+function MemberDetailPage({ memberId, onNavigate, team, memberScope, meetingNotes, workItems, customers, onWorkItemUpdate, onWorkItemCreate, memberAssignments, onAssignCustomer, onUnassignCustomer, onUpdateAssignmentPercentage }: { memberId: string; onNavigate: (page: string, id?: string) => void; team: TeamMember[]; memberScope: Record<string, ViewScope>; meetingNotes: MeetingNoteItem[]; workItems: WorkItemDB[]; customers: CustomerDB[]; onWorkItemUpdate: (id: string, patch: Record<string, unknown>) => void; onWorkItemCreate: (memberId: string, fields: { title: string; customerId?: string | null; priority?: string }) => void; memberAssignments: MemberCustomerAssignment[]; onAssignCustomer: (teamMemberId: string, customerId: string, percentage?: number | null) => void; onUnassignCustomer: (teamMemberId: string, customerId: string) => void; onUpdateAssignmentPercentage: (teamMemberId: string, customerId: string, percentage: number | null) => void }) {
   const [showAddForm, setShowAddForm] = useState(false);
   const [newTitle, setNewTitle] = useState("");
   const [newCustomerId, setNewCustomerId] = useState<string>("");
   const [newPriority, setNewPriority] = useState("Medium");
+  const [assignCustomerId, setAssignCustomerId] = useState("");
+  const [assignPercentage, setAssignPercentage] = useState("");
+  const [editingPct, setEditingPct] = useState<string | null>(null);
+  const [editPctValue, setEditPctValue] = useState("");
   const member = team.find((t) => t.id === memberId);
   const items = workItems.filter((w) => w.memberId === memberId);
   const notes = meetingNotes.filter((n) => n.memberId === memberId);
@@ -490,6 +500,86 @@ function MemberDetailPage({ memberId, onNavigate, team, memberScope, meetingNote
           </button>
         </div>
       </div>
+      {/* ── Customer Assignments ── */}
+      {(() => {
+        const myAssignments = memberAssignments.filter((a) => a.teamMemberId === memberId);
+        const assignedIds = new Set(myAssignments.map((a) => a.customerId));
+        const availableCustomers = customers.filter((c) => !assignedIds.has(c.id));
+        return (
+          <div style={{ ...styles.card, marginBottom: 16 }}>
+            <div style={styles.cardHeader}>
+              <span style={styles.cardTitle}>Customer Assignments ({myAssignments.length})</span>
+            </div>
+            <div style={{ padding: "12px 20px" }}>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: myAssignments.length > 0 ? 12 : 0 }}>
+                {myAssignments.map((a) => (
+                  <span key={a.customerId} style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 6, fontSize: 12, background: "#F4F4F5", color: V.copy }}>
+                    {a.customerName}
+                    {editingPct === a.customerId ? (
+                      <input
+                        autoFocus
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={editPctValue}
+                        onChange={(e) => setEditPctValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") { onUpdateAssignmentPercentage(memberId, a.customerId, editPctValue ? parseInt(editPctValue) : null); setEditingPct(null); }
+                          if (e.key === "Escape") setEditingPct(null);
+                        }}
+                        onBlur={() => { onUpdateAssignmentPercentage(memberId, a.customerId, editPctValue ? parseInt(editPctValue) : null); setEditingPct(null); }}
+                        style={{ width: 44, padding: "1px 4px", fontSize: 11, border: `1px solid ${V.border}`, borderRadius: 4, textAlign: "center" }}
+                        placeholder="%"
+                      />
+                    ) : (
+                      <span
+                        style={{ color: V.muted, cursor: "pointer", fontSize: 11 }}
+                        onClick={() => { setEditingPct(a.customerId); setEditPctValue(a.percentage != null ? String(a.percentage) : ""); }}
+                        title="Click to edit %"
+                      >
+                        {a.percentage != null ? `${a.percentage}%` : "(set %)"}
+                      </span>
+                    )}
+                    <X size={12} style={{ cursor: "pointer", color: V.muted, marginLeft: 2 }} onClick={() => onUnassignCustomer(memberId, a.customerId)} />
+                  </span>
+                ))}
+              </div>
+              {availableCustomers.length > 0 && (
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <select
+                    value={assignCustomerId}
+                    onChange={(e) => setAssignCustomerId(e.target.value)}
+                    style={{ padding: "6px 8px", fontSize: 12, border: `1px solid ${V.border}`, borderRadius: 6 }}
+                  >
+                    <option value="">Assign customer...</option>
+                    {availableCustomers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                  </select>
+                  <input
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={assignPercentage}
+                    onChange={(e) => setAssignPercentage(e.target.value)}
+                    placeholder="% (optional)"
+                    style={{ width: 90, padding: "6px 8px", fontSize: 12, border: `1px solid ${V.border}`, borderRadius: 6 }}
+                  />
+                  <button
+                    style={{ ...btn(true), padding: "6px 12px", fontSize: 12 }}
+                    onClick={() => {
+                      if (!assignCustomerId) return;
+                      onAssignCustomer(memberId, assignCustomerId, assignPercentage ? parseInt(assignPercentage) : null);
+                      setAssignCustomerId("");
+                      setAssignPercentage("");
+                    }}
+                  >
+                    Assign
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        );
+      })()}
       <div style={styles.grid2}>
         <div style={styles.card}>
           <div style={styles.cardHeader}>
@@ -717,7 +807,7 @@ function OneOnOnePage({ memberId, onNavigate, team, memberScope, meetingNotes, a
             <TrendingUp size={16} color="#3B82F6" style={{ marginTop: 2, flexShrink: 0 }} />
             <div>
               <div style={{ fontSize: 13, fontWeight: 600 }}>Work in progress</div>
-              <div style={{ fontSize: 12, color: V.muted }}>{items.filter((w) => w.status === "In Progress").length} items active across {member.customers.join(", ")}</div>
+              <div style={{ fontSize: 12, color: V.muted }}>{items.filter((w) => w.status === "In Progress").length} items active across {member.customers.map((c) => c.name).join(", ")}</div>
             </div>
           </div>
           <div style={{ display: "flex", gap: 8, alignItems: "flex-start" }}>
@@ -1014,18 +1104,31 @@ export default function Page() {
   const [actionItems, setActionItems] = useState<ActionItemDB[]>([]);
   const [workItems, setWorkItems] = useState<WorkItemDB[]>([]);
   const [customers, setCustomers] = useState<CustomerDB[]>([]);
+  const [memberAssignments, setMemberAssignments] = useState<MemberCustomerAssignment[]>([]);
+  const legacyToUuid = useRef<Record<string, string>>({});
   const router = useRouter();
 
-  // Derive member-customer assignments from work items
+  // Derive member-customer tags: prefer explicit assignments, fall back to work-item-derived
   const memberCustomers = useMemo(() => {
-    const map: Record<string, string[]> = {};
+    const map: Record<string, CustomerTag[]> = {};
+    // Explicit assignments take priority
+    for (const a of memberAssignments) {
+      const mid = a.teamMemberId;
+      if (!map[mid]) map[mid] = [];
+      if (!map[mid].some((c) => c.name === a.customerName)) {
+        map[mid].push({ name: a.customerName, percentage: a.percentage });
+      }
+    }
+    // Fall back: add work-item-derived customers not already present
     for (const w of workItems) {
       if (!w.customerName) continue;
       if (!map[w.memberId]) map[w.memberId] = [];
-      if (!map[w.memberId].includes(w.customerName)) map[w.memberId].push(w.customerName);
+      if (!map[w.memberId].some((c) => c.name === w.customerName)) {
+        map[w.memberId].push({ name: w.customerName, percentage: null });
+      }
     }
     return map;
-  }, [workItems]);
+  }, [workItems, memberAssignments]);
 
   useEffect(() => {
     const supabase = createClient();
@@ -1037,10 +1140,15 @@ export default function Page() {
 
       // Build UUID-to-legacy lookup for work items
       const uuidToLegacy: Record<string, string> = {};
+      const l2u: Record<string, string> = {};
       data.forEach((row) => {
         const legacyId = EMAIL_TO_LEGACY_ID[row.email];
-        if (legacyId) uuidToLegacy[row.id] = legacyId;
+        if (legacyId) {
+          uuidToLegacy[row.id] = legacyId;
+          l2u[legacyId] = row.id;
+        }
       });
+      legacyToUuid.current = l2u;
 
       const members: TeamMember[] = data.map((row) => {
         const legacyId = EMAIL_TO_LEGACY_ID[row.email] || row.id;
@@ -1070,6 +1178,22 @@ export default function Page() {
           setCustomers(custData.map((c: any) => ({ id: c.id, name: c.name, connectionStatus: c.connection_status })));
         }
       });
+
+      // Fetch customer assignments (M2M)
+      supabase
+        .from("team_member_customers")
+        .select("team_member_id, customer_id, percentage, customers(name)")
+        .then(({ data: assignData }) => {
+          if (assignData && assignData.length > 0) {
+            const mapped: MemberCustomerAssignment[] = assignData.map((row: any) => ({
+              teamMemberId: uuidToLegacy[row.team_member_id] || row.team_member_id,
+              customerId: row.customer_id,
+              customerName: row.customers?.name || "",
+              percentage: row.percentage,
+            }));
+            setMemberAssignments(mapped);
+          }
+        });
 
       // Fetch work items from Supabase with customer join
       supabase
@@ -1316,6 +1440,79 @@ export default function Page() {
     }
   };
 
+  // ── Customer assignment handlers ──
+  const resolveUuid = (legacyId: string) => legacyToUuid.current[legacyId] || legacyId;
+
+  const handleAssignCustomer = async (teamMemberId: string, customerId: string, percentage?: number | null) => {
+    const uuid = resolveUuid(teamMemberId);
+    const cust = customers.find((c) => c.id === customerId);
+    // Optimistic
+    setMemberAssignments((prev) => [...prev, { teamMemberId, customerId, customerName: cust?.name || "", percentage: percentage ?? null }]);
+    try {
+      const res = await fetch("/api/member-customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamMemberId: uuid, customerId, percentage: percentage ?? null }),
+      });
+      if (!res.ok) {
+        const err = await res.json();
+        console.error("Failed to assign customer:", err.error);
+        setMemberAssignments((prev) => prev.filter((a) => !(a.teamMemberId === teamMemberId && a.customerId === customerId)));
+      }
+    } catch (err) {
+      console.error("Failed to assign customer:", err);
+      setMemberAssignments((prev) => prev.filter((a) => !(a.teamMemberId === teamMemberId && a.customerId === customerId)));
+    }
+  };
+
+  const handleUnassignCustomer = async (teamMemberId: string, customerId: string) => {
+    const uuid = resolveUuid(teamMemberId);
+    const prev = memberAssignments.find((a) => a.teamMemberId === teamMemberId && a.customerId === customerId);
+    // Optimistic
+    setMemberAssignments((p) => p.filter((a) => !(a.teamMemberId === teamMemberId && a.customerId === customerId)));
+    try {
+      const res = await fetch("/api/member-customers", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamMemberId: uuid, customerId }),
+      });
+      if (!res.ok) {
+        console.error("Failed to unassign customer");
+        if (prev) setMemberAssignments((p) => [...p, prev]);
+      }
+    } catch (err) {
+      console.error("Failed to unassign customer:", err);
+      if (prev) setMemberAssignments((p) => [...p, prev]);
+    }
+  };
+
+  const handleUpdateAssignmentPercentage = async (teamMemberId: string, customerId: string, percentage: number | null) => {
+    const uuid = resolveUuid(teamMemberId);
+    const oldPct = memberAssignments.find((a) => a.teamMemberId === teamMemberId && a.customerId === customerId)?.percentage ?? null;
+    // Optimistic
+    setMemberAssignments((prev) => prev.map((a) =>
+      a.teamMemberId === teamMemberId && a.customerId === customerId ? { ...a, percentage } : a
+    ));
+    try {
+      const res = await fetch("/api/member-customers", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ teamMemberId: uuid, customerId, percentage }),
+      });
+      if (!res.ok) {
+        console.error("Failed to update percentage");
+        setMemberAssignments((prev) => prev.map((a) =>
+          a.teamMemberId === teamMemberId && a.customerId === customerId ? { ...a, percentage: oldPct } : a
+        ));
+      }
+    } catch (err) {
+      console.error("Failed to update percentage:", err);
+      setMemberAssignments((prev) => prev.map((a) =>
+        a.teamMemberId === teamMemberId && a.customerId === customerId ? { ...a, percentage: oldPct } : a
+      ));
+    }
+  };
+
   const handleSignOut = async () => {
     const supabase = createClient();
     await supabase.auth.signOut();
@@ -1343,7 +1540,7 @@ export default function Page() {
   // Determine if current member drill-down is from a leadership member
   const isLeadershipMemberPage = (page === "member" || page === "oneOnOne") && !!selectedId && memberScope[selectedId] === "leadership";
 
-  const tp = { team: teamWithCustomers, memberScope, meetingNotes, actionItems, setActionItems, workItems, customers, onWorkItemUpdate: handleWorkItemUpdate, onWorkItemCreate: handleWorkItemCreate, onCustomerCreate: handleCustomerCreate, onCustomerDelete: handleCustomerDelete };
+  const tp = { team: teamWithCustomers, memberScope, meetingNotes, actionItems, setActionItems, workItems, customers, onWorkItemUpdate: handleWorkItemUpdate, onWorkItemCreate: handleWorkItemCreate, onCustomerCreate: handleCustomerCreate, onCustomerDelete: handleCustomerDelete, memberAssignments, onAssignCustomer: handleAssignCustomer, onUnassignCustomer: handleUnassignCustomer, onUpdateAssignmentPercentage: handleUpdateAssignmentPercentage };
 
   const renderPage = () => {
     switch (page) {

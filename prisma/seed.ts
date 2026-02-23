@@ -77,6 +77,23 @@ async function main() {
     if (row) customersByName.set(c.name, row);
   }
 
+  // 3. Seed customer assignments (M2M)
+  for (const member of TEAM) {
+    const memberRow = membersByEmail.get(member.email);
+    if (!memberRow || member.customers.length === 0) continue;
+    for (const custName of member.customers) {
+      const custRow = customersByName.get(custName);
+      if (!custRow) continue;
+      await prisma.teamMemberCustomer.upsert({
+        where: { teamMemberId_customerId: { teamMemberId: memberRow.id, customerId: custRow.id } },
+        update: {},
+        create: { teamMemberId: memberRow.id, customerId: custRow.id },
+      });
+    }
+  }
+  console.log("Seeded customer assignments");
+
+  // 4. Seed work items
   for (const wi of WORK_ITEMS) {
     const member = membersByEmail.get(wi.memberEmail);
     const customer = customersByName.get(wi.customer);

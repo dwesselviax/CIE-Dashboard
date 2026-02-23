@@ -29,11 +29,12 @@ model TeamMember {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @default(now()) @updatedAt @map("updated_at")
 
-  workItems    WorkItem[]
-  adhocUpdates AdhocUpdate[]
-  meetingNotes MeetingNote[] @relation("MeetingNoteMember")
-  managedNotes MeetingNote[] @relation("MeetingNoteManager")
-  preps        OneOnePrep[]
+  workItems            WorkItem[]
+  adhocUpdates         AdhocUpdate[]
+  meetingNotes         MeetingNote[] @relation("MeetingNoteMember")
+  managedNotes         MeetingNote[] @relation("MeetingNoteManager")
+  preps                OneOnePrep[]
+  customerAssignments  TeamMemberCustomer[]
 
   @@map("team_members")
 }
@@ -49,8 +50,9 @@ model Customer {
   createdAt        DateTime @default(now()) @map("created_at")
   updatedAt        DateTime @default(now()) @updatedAt @map("updated_at")
 
-  workItems    WorkItem[]
-  adhocUpdates AdhocUpdate[]
+  workItems         WorkItem[]
+  adhocUpdates      AdhocUpdate[]
+  memberAssignments TeamMemberCustomer[]
 
   @@map("customers")
 }
@@ -186,4 +188,20 @@ model OneOnePrep {
   teamMember TeamMember @relation(fields: [teamMemberId], references: [id])
 
   @@map("oneone_prep")
+}
+
+// ─── Team Member ↔ Customer Assignments (M2M with % allocation) ──
+
+model TeamMemberCustomer {
+  id           String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  teamMemberId String   @map("team_member_id") @db.Uuid
+  customerId   String   @map("customer_id") @db.Uuid
+  percentage   Int?     // optional % of time allocated (0-100)
+  createdAt    DateTime @default(now()) @map("created_at")
+
+  teamMember TeamMember @relation(fields: [teamMemberId], references: [id])
+  customer   Customer   @relation(fields: [customerId], references: [id])
+
+  @@unique([teamMemberId, customerId])
+  @@map("team_member_customers")
 }
