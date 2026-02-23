@@ -145,11 +145,31 @@ model MeetingNote {
   createdAt    DateTime @default(now()) @map("created_at")
   syncedAt     DateTime @default(now()) @map("synced_at")
 
-  teamMember TeamMember @relation("MeetingNoteMember", fields: [teamMemberId], references: [id])
-  manager    TeamMember @relation("MeetingNoteManager", fields: [managerId], references: [id])
+  teamMember     TeamMember   @relation("MeetingNoteMember", fields: [teamMemberId], references: [id])
+  manager        TeamMember   @relation("MeetingNoteManager", fields: [managerId], references: [id])
+  actionItemRows ActionItem[]
 
-  @@unique([source, sourceId])
+  @@unique([source, sourceId, teamMemberId])
   @@map("meeting_notes")
+}
+
+// ─── Action Items (extracted from meeting notes) ─────────────────────
+
+model ActionItem {
+  id            String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  meetingNoteId String    @map("meeting_note_id") @db.Uuid
+  text          String
+  assignee      String?
+  done          Boolean   @default(false)
+  comment       String?
+  closedAt      DateTime? @map("closed_at")
+  createdAt     DateTime  @default(now()) @map("created_at")
+  updatedAt     DateTime  @default(now()) @updatedAt @map("updated_at")
+
+  meetingNote   MeetingNote @relation(fields: [meetingNoteId], references: [id])
+
+  @@unique([meetingNoteId, text])
+  @@map("action_items")
 }
 
 // ─── 1:1 Prep Context (AI-generated) ───────────────────────────────

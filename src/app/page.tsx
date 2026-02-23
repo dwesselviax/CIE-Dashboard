@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import type { User } from "@supabase/supabase-js";
@@ -23,6 +23,11 @@ import {
   LayoutDashboard,
   Lock,
   LogOut,
+  ChevronDown,
+  ChevronUp,
+  MessageCircle,
+  Plus,
+  X,
 } from "lucide-react";
 
 // ─── viax Design Tokens ─────────────────────────────────────────────
@@ -44,47 +49,50 @@ const V = {
 };
 
 // ─── Mock Data ──────────────────────────────────────────────────────
-const TEAM = [
-  { id: "1", name: "Lucas Seidenfus", email: "lseidenfus@viax.io", role: "Senior Engineer", avatar: "LS", customers: ["2U"], oneOnOneCount: 6 },
-  { id: "2", name: "Akash Devgan", email: "adevgan@viax.io", role: "Engineer", avatar: "AD", customers: ["Solventum"], oneOnOneCount: 2 },
-  { id: "3", name: "Vishnu Anisetti", email: "vanisetti@viax.io", role: "Engineer", avatar: "VA", customers: ["Stryker"], oneOnOneCount: 2 },
-  { id: "4", name: "Rick Chavie", email: "rchavie@viax.io", role: "Business Dev", avatar: "RC", customers: ["Boston Scientific", "Strategym"], oneOnOneCount: 2 },
-  { id: "5", name: "Brian Diehl", email: "bdiehl@viax.io", role: "Engineer Lead", avatar: "BD", customers: ["Solventum", "Shopify"], oneOnOneCount: 2 },
-  { id: "6", name: "Andrew Martin", email: "amartin@viax.io", role: "Engineer", avatar: "AM", customers: ["Solventum", "2U"], oneOnOneCount: 1 },
-  { id: "7", name: "Vova Zubyk", email: "vzubyk@viax.io", role: "Engineer", avatar: "VZ", customers: ["Zaelab"], oneOnOneCount: 1 },
-  { id: "8", name: "Francisco Santana", email: "fsantana@viax.io", role: "Engineer", avatar: "FS", customers: ["Boston Scientific"], oneOnOneCount: 1 },
-];
+// Team roster is fetched from Supabase (see Page component).
+// Legacy ID mapping keeps mock work items / meeting notes working until those move to DB too.
+const EMAIL_TO_LEGACY_ID: Record<string, string> = {
+  "lseidenfus@viax.io": "1", "adevgan@viax.io": "2", "vanisetti@viax.io": "3",
+  "rchavie@viax.io": "4", "bdiehl@viax.io": "5", "amartin@viax.io": "6",
+  "vzubyk@viax.io": "7", "fsantana@viax.io": "8",
+};
+// DB types for work items and customers fetched from Supabase
+type WorkItemDB = {
+  id: string; source: string; memberId: string;
+  customerId: string | null; customerName: string;
+  title: string; status: string; priority: string;
+  isBlocker: boolean; blockerDescription: string | null;
+  daysInStatus: number;
+};
+type CustomerDB = { id: string; name: string; connectionStatus: string };
 
-const CUSTOMERS = [
-  { id: "c1", name: "Solventum", status: "active", members: ["2", "5", "6"] },
-  { id: "c2", name: "2U", status: "active", members: ["1", "6"] },
-  { id: "c3", name: "Boston Scientific", status: "active", members: ["4", "8"] },
-  { id: "c4", name: "Stryker", status: "active", members: ["3"] },
-  { id: "c5", name: "Shopify", status: "active", members: ["5"] },
-  { id: "c6", name: "Zaelab", status: "active", members: ["7"] },
-  { id: "c7", name: "Strategym", status: "discovery", members: ["4"] },
-];
+type TeamMember = {
+  id: string; name: string; email: string; role: string;
+  avatar: string; customers: string[]; oneOnOneCount: number;
+};
 
-const WORK_ITEMS = [
-  { id: "w1", memberId: "1", customer: "2U", title: "Documentation deprecation workflow", status: "In Progress", priority: "High", source: "jira-internal", isBlocker: false, daysInStatus: 3 },
-  { id: "w2", memberId: "1", customer: "2U", title: "Tool selection — blocked on Propello", status: "Blocked", priority: "Critical", source: "jira-internal", isBlocker: true, blockerDesc: "Propello unavailable for over a week — hard dependency for tool selection decisions", daysInStatus: 8 },
-  { id: "w3", memberId: "1", customer: "2U", title: "Demo server testing with product determination", status: "To Do", priority: "Medium", source: "jira-internal", isBlocker: false, daysInStatus: 1 },
-  { id: "w4", memberId: "2", customer: "Solventum", title: "Configuration rules implementation", status: "In Progress", priority: "High", source: "jira-customer", isBlocker: false, daysInStatus: 5 },
-  { id: "w5", memberId: "2", customer: "Solventum", title: "MedSurgery integration check-in prep", status: "Done", priority: "Medium", source: "jira-internal", isBlocker: false, daysInStatus: 0 },
-  { id: "w6", memberId: "3", customer: "Stryker", title: "MSP knowledge transfer — Enterprise Apps", status: "In Progress", priority: "High", source: "jira-customer", isBlocker: false, daysInStatus: 2 },
-  { id: "w7", memberId: "3", customer: "Stryker", title: "eComm & Payment KT session follow-ups", status: "To Do", priority: "Medium", source: "jira-internal", isBlocker: false, daysInStatus: 4 },
-  { id: "w8", memberId: "4", customer: "Boston Scientific", title: "Monthly catch-up action items", status: "In Progress", priority: "Medium", source: "jira-internal", isBlocker: false, daysInStatus: 3 },
-  { id: "w9", memberId: "4", customer: "Boston Scientific", title: "Stakeholder access — blocked by middle mgmt", status: "Blocked", priority: "High", source: "jira-customer", isBlocker: true, blockerDesc: "Limited business stakeholder access due to middle management resistance", daysInStatus: 14 },
-  { id: "w10", memberId: "5", customer: "Solventum", title: "Frontend review action items", status: "In Progress", priority: "High", source: "jira-internal", isBlocker: false, daysInStatus: 1 },
-  { id: "w11", memberId: "5", customer: "Shopify", title: "Fuse Integration Hub showcase follow-up", status: "To Do", priority: "Low", source: "jira-internal", isBlocker: false, daysInStatus: 6 },
-  { id: "w12", memberId: "6", customer: "Solventum", title: "Bi-weekly sync action items", status: "In Progress", priority: "Medium", source: "jira-internal", isBlocker: false, daysInStatus: 2 },
-  { id: "w13", memberId: "6", customer: "2U", title: "edX subscriptions timeline review", status: "Blocked", priority: "High", source: "jira-customer", isBlocker: true, blockerDesc: "Waiting on 2U team for timeline confirmation — no response in 5 days", daysInStatus: 5 },
-  { id: "w14", memberId: "7", customer: "Zaelab", title: "Monthly Solventum sync via Zaelab", status: "Done", priority: "Medium", source: "jira-internal", isBlocker: false, daysInStatus: 0 },
-  { id: "w15", memberId: "8", customer: "Boston Scientific", title: "SAP ERP upgrade simplification research", status: "In Progress", priority: "Medium", source: "jira-internal", isBlocker: false, daysInStatus: 7 },
-  { id: "w16", memberId: "8", customer: "Boston Scientific", title: "Enterprise integration strategy — AI connectors", status: "To Do", priority: "High", source: "jira-customer", isBlocker: false, daysInStatus: 3 },
-];
+type MeetingNoteItem = {
+  id: string; memberId: string; title: string; date: string; source: string;
+  topics: string[]; actionItems: { text: string; done: boolean }[]; summary: string;
+};
 
-const MEETING_NOTES = [
+type ActionItemDB = {
+  id: string;
+  meeting_note_id: string;
+  text: string;
+  assignee: string | null;
+  done: boolean;
+  comment: string | null;
+  closed_at: string | null;
+  created_at: string;
+  // joined fields
+  noteTitle?: string;
+  noteDate?: string;
+};
+
+// Work item and customer data are now fetched from Supabase (see Page component).
+
+const MOCK_MEETING_NOTES = [
   { id: "m1", memberId: "1", title: "1:1 Doug & Lucas", date: "2026-01-26", source: "granola", topics: ["Documentation workflow", "Propello dependency", "Customer expansion strategy", "Strategic positioning"], actionItems: [{ text: "Schedule intervention call with Propello and Dennis", done: true }, { text: "Continue customer expansion strategy discussion", done: false }, { text: "Test demo server with product determination and pricing", done: false }], summary: "Discussed documentation progress and Propello hard dependency blocking tool selection. Lucas raised concerns about expansion strategy requiring significant human investment per account. Identified Solventum as the success model (Tegan as technical rockstar stakeholder). Need to position as strategic partner to trusted advisors." },
   { id: "m2", memberId: "1", title: "1:1 Doug & Lucas", date: "2026-01-19", source: "granola", topics: ["2U project planning", "Timeline alignment", "Resource allocation"], actionItems: [{ text: "Finalize 2U project timeline", done: true }, { text: "Align with Andrew on shared 2U work", done: true }], summary: "Reviewed 2U project timeline and resource needs. Agreed on phased approach starting with documentation before expanding scope. Lucas to coordinate with Andrew on shared deliverables." },
   { id: "m3", memberId: "1", title: "Connect on 2U", date: "2026-01-12", source: "granola", topics: ["2U expectations", "Delivery timeline", "Client relationship"], actionItems: [{ text: "Draft expectations document for 2U", done: true }, { text: "Review delivery milestones", done: true }], summary: "Quick sync on 2U engagement expectations and next steps. Aligned on delivery cadence and communication rhythm with the client." },
@@ -104,31 +112,25 @@ const MEETING_NOTES = [
 // ─── View Scope ─────────────────────────────────────────────────────
 type ViewScope = "team" | "leadership";
 
-const MEMBER_SCOPE: Record<string, ViewScope> = {
-  "1": "team",       // Lucas Seidenfus
-  "2": "team",       // Akash Devgan
-  "3": "team",       // Vishnu Anisetti
-  "4": "leadership", // Rick Chavie
-  "5": "leadership", // Brian Diehl
-  "6": "leadership", // Andrew Martin
-  "7": "team",       // Vova Zubyk
-  "8": "team",       // Francisco Santana
+// MEMBER_SCOPE is built dynamically from DB data in the Page component.
+// These helpers accept it as a parameter.
+const getTeamForScope = (team: TeamMember[], memberScope: Record<string, ViewScope>, scope: ViewScope) =>
+  team.filter((m) => memberScope[m.id] === scope);
+
+const getWorkItemsForScope = (workItems: WorkItemDB[], memberScope: Record<string, ViewScope>, scope: ViewScope) =>
+  workItems.filter((w) => memberScope[w.memberId] === scope);
+
+const getMeetingNotesForScope = (notes: MeetingNoteItem[], memberScope: Record<string, ViewScope>, scope: ViewScope) =>
+  notes.filter((n) => memberScope[n.memberId] === scope);
+
+const getCustomersForScope = (customers: CustomerDB[], workItems: WorkItemDB[], memberScope: Record<string, ViewScope>, scope: ViewScope) => {
+  // Derive member lists from work items; keep customers with no work items (e.g. newly created)
+  return customers.map((c) => {
+    const allMemberIds = Array.from(new Set(workItems.filter((w) => w.customerName === c.name).map((w) => w.memberId)));
+    const scopedMembers = allMemberIds.filter((id) => memberScope[id] === scope);
+    return { ...c, status: c.connectionStatus, members: scopedMembers, hasWorkItems: allMemberIds.length > 0 };
+  }).filter((c) => c.members.length > 0 || !c.hasWorkItems);
 };
-
-const getTeamForScope = (scope: ViewScope) =>
-  TEAM.filter((m) => MEMBER_SCOPE[m.id] === scope);
-
-const getWorkItemsForScope = (scope: ViewScope) =>
-  WORK_ITEMS.filter((w) => MEMBER_SCOPE[w.memberId] === scope);
-
-const getMeetingNotesForScope = (scope: ViewScope) =>
-  MEETING_NOTES.filter((n) => MEMBER_SCOPE[n.memberId] === scope);
-
-const getCustomersForScope = (scope: ViewScope) =>
-  CUSTOMERS.map((c) => ({
-    ...c,
-    members: c.members.filter((id) => MEMBER_SCOPE[id] === scope),
-  })).filter((c) => c.members.length > 0);
 
 const CONNECTORS = [
   { id: "conn1", name: "Internal Jira", type: "jira", status: "active", lastSync: "2 min ago", itemCount: 47 },
@@ -241,31 +243,133 @@ function PriorityDot({ priority }: { priority: string }) {
   );
 }
 
-function WorkItemRow({ item, showMember }: { item: typeof WORK_ITEMS[number]; showMember?: boolean }) {
-  const member = TEAM.find((t) => t.id === item.memberId);
+function WorkItemRow({ item, showMember, team, onUpdate, customers }: { item: WorkItemDB; showMember?: boolean; team: TeamMember[]; onUpdate?: (id: string, patch: Record<string, unknown>) => void; customers?: CustomerDB[] }) {
+  const [editingField, setEditingField] = useState<string | null>(null);
+  const [blockerText, setBlockerText] = useState(item.blockerDescription || "");
+  const [titleText, setTitleText] = useState(item.title);
+  const member = team.find((t) => t.id === item.memberId);
+
+  const handleFieldChange = (field: string, value: unknown) => {
+    setEditingField(null);
+    if (onUpdate) onUpdate(item.id, { [field]: value });
+  };
+
   return (
     <div style={{ padding: "12px 20px", borderBottom: `1px solid ${V.border}`, display: "flex", alignItems: "center", gap: 12 }}>
       {showMember && member && <div style={avatar(28)}>{member.avatar}</div>}
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, fontWeight: 500, color: V.copy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{item.title}</div>
-        <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center" }}>
-          <span style={styles.tag}>{item.customer}</span>
-          <PriorityDot priority={item.priority} />
-          {item.daysInStatus > 0 && <span style={{ fontSize: 11, color: V.muted }}>{item.daysInStatus}d in status</span>}
-        </div>
-        {item.isBlocker && item.blockerDesc && (
-          <div style={{ fontSize: 12, color: V.danger, marginTop: 6, padding: "6px 10px", background: V.dangerBg, borderRadius: 6 }}>
-            <AlertTriangle size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
-            {item.blockerDesc}
-          </div>
+        {editingField === "title" && onUpdate ? (
+          <input
+            autoFocus
+            type="text"
+            value={titleText}
+            onChange={(e) => setTitleText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") { onUpdate(item.id, { title: titleText }); setEditingField(null); }
+              if (e.key === "Escape") { setTitleText(item.title); setEditingField(null); }
+            }}
+            onBlur={() => { if (titleText && titleText !== item.title) { onUpdate(item.id, { title: titleText }); } setEditingField(null); }}
+            style={{ width: "100%", fontSize: 13, fontWeight: 500, color: V.copy, padding: "2px 6px", border: `1px solid ${V.border}`, borderRadius: 4, outline: "none" }}
+          />
+        ) : (
+          <div style={{ fontSize: 13, fontWeight: 500, color: V.copy, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", cursor: onUpdate ? "pointer" : "default" }} onClick={() => onUpdate && (setTitleText(item.title), setEditingField("title"))}>{item.title}</div>
         )}
+        <div style={{ display: "flex", gap: 8, marginTop: 4, alignItems: "center", flexWrap: "wrap" }}>
+          {/* Customer — click to edit */}
+          {editingField === "customer" && customers ? (
+            <select
+              autoFocus
+              value={item.customerId || ""}
+              onChange={(e) => handleFieldChange("customerId", e.target.value || null)}
+              onBlur={() => setEditingField(null)}
+              style={{ fontSize: 11, padding: "2px 4px", borderRadius: 4, border: `1px solid ${V.border}` }}
+            >
+              <option value="">None</option>
+              {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+          ) : (
+            <span style={{ ...styles.tag, cursor: onUpdate ? "pointer" : "default" }} onClick={() => onUpdate && setEditingField("customer")}>{item.customerName || "—"}</span>
+          )}
+          {/* Priority — click to edit */}
+          {editingField === "priority" ? (
+            <select
+              autoFocus
+              value={item.priority}
+              onChange={(e) => handleFieldChange("priority", e.target.value)}
+              onBlur={() => setEditingField(null)}
+              style={{ fontSize: 11, padding: "2px 4px", borderRadius: 4, border: `1px solid ${V.border}` }}
+            >
+              {["Critical", "High", "Medium", "Low"].map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+          ) : (
+            <span style={{ cursor: onUpdate ? "pointer" : "default" }} onClick={() => onUpdate && setEditingField("priority")}>
+              <PriorityDot priority={item.priority} />
+            </span>
+          )}
+          {item.daysInStatus > 0 && <span style={{ fontSize: 11, color: V.muted }}>{item.daysInStatus}d in status</span>}
+          {/* Blocker toggle */}
+          {onUpdate && (
+            <span
+              style={{ cursor: "pointer", fontSize: 12, color: item.isBlocker ? V.danger : V.muted, display: "inline-flex", alignItems: "center", gap: 2 }}
+              onClick={() => {
+                if (item.isBlocker) {
+                  onUpdate(item.id, { isBlocker: false });
+                } else {
+                  onUpdate(item.id, { isBlocker: true });
+                  setEditingField("blocker");
+                  setBlockerText("");
+                }
+              }}
+              title={item.isBlocker ? "Remove blocker" : "Mark as blocker"}
+            >
+              <AlertTriangle size={12} />
+            </span>
+          )}
+        </div>
+        {item.isBlocker && editingField === "blocker" && onUpdate ? (
+          <div style={{ marginTop: 6 }}>
+            <input
+              autoFocus
+              type="text"
+              value={blockerText}
+              onChange={(e) => setBlockerText(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") { onUpdate(item.id, { blockerDescription: blockerText }); setEditingField(null); }
+                if (e.key === "Escape") setEditingField(null);
+              }}
+              onBlur={() => { if (blockerText) { onUpdate(item.id, { blockerDescription: blockerText }); } setEditingField(null); }}
+              placeholder="Describe the blocker..."
+              style={{ width: "100%", padding: "6px 10px", fontSize: 12, border: `1px solid ${V.danger}40`, borderRadius: 6, background: V.dangerBg, outline: "none" }}
+            />
+          </div>
+        ) : item.isBlocker && item.blockerDescription ? (
+          <div style={{ fontSize: 12, color: V.danger, marginTop: 6, padding: "6px 10px", background: V.dangerBg, borderRadius: 6, cursor: onUpdate ? "pointer" : "default" }} onClick={() => onUpdate && (setEditingField("blocker"), setBlockerText(item.blockerDescription || ""))}>
+            <AlertTriangle size={12} style={{ marginRight: 4, verticalAlign: "middle" }} />
+            {item.blockerDescription}
+          </div>
+        ) : null}
       </div>
-      <StatusBadge status={item.status} />
+      {/* Status — click to edit */}
+      {editingField === "status" ? (
+        <select
+          autoFocus
+          value={item.status}
+          onChange={(e) => handleFieldChange("status", e.target.value)}
+          onBlur={() => setEditingField(null)}
+          style={{ fontSize: 11, padding: "2px 6px", borderRadius: 99, border: `1px solid ${V.border}` }}
+        >
+          {["To Do", "In Progress", "Blocked", "Done"].map((s) => <option key={s} value={s}>{s}</option>)}
+        </select>
+      ) : (
+        <span style={{ cursor: onUpdate ? "pointer" : "default" }} onClick={() => onUpdate && setEditingField("status")}>
+          <StatusBadge status={item.status} />
+        </span>
+      )}
     </div>
   );
 }
 
-function MeetingNoteCard({ note }: { note: typeof MEETING_NOTES[number] }) {
+function MeetingNoteCard({ note }: { note: MeetingNoteItem }) {
   const [expanded, setExpanded] = useState(false);
   return (
     <div style={{ padding: "16px 20px", borderBottom: `1px solid ${V.border}` }}>
@@ -299,10 +403,10 @@ function MeetingNoteCard({ note }: { note: typeof MEETING_NOTES[number] }) {
 }
 
 // ─── Pages ──────────────────────────────────────────────────────────
-function DashboardView({ onNavigate, scope = "team" }: { onNavigate: (page: string, id?: string) => void; scope?: ViewScope }) {
-  const team = getTeamForScope(scope);
-  const workItems = getWorkItemsForScope(scope);
-  const customers = getCustomersForScope(scope);
+function DashboardView({ onNavigate, scope = "team", team: allTeam, memberScope, workItems: allWorkItems, customers: allCustomers }: { onNavigate: (page: string, id?: string) => void; scope?: ViewScope; team: TeamMember[]; memberScope: Record<string, ViewScope>; workItems: WorkItemDB[]; customers: CustomerDB[] }) {
+  const team = getTeamForScope(allTeam, memberScope, scope);
+  const workItems = getWorkItemsForScope(allWorkItems, memberScope, scope);
+  const customers = getCustomersForScope(allCustomers, allWorkItems, memberScope, scope);
   const blockers = workItems.filter((w) => w.isBlocker);
   const inProgress = workItems.filter((w) => w.status === "In Progress");
   const isLeadership = scope === "leadership";
@@ -345,11 +449,29 @@ function DashboardView({ onNavigate, scope = "team" }: { onNavigate: (page: stri
   );
 }
 
-function MemberDetailPage({ memberId, onNavigate }: { memberId: string; onNavigate: (page: string, id?: string) => void }) {
-  const member = TEAM.find((t) => t.id === memberId);
-  const items = WORK_ITEMS.filter((w) => w.memberId === memberId);
-  const notes = MEETING_NOTES.filter((n) => n.memberId === memberId);
-  const isLeadership = MEMBER_SCOPE[memberId] === "leadership";
+function MemberDetailPage({ memberId, onNavigate, team, memberScope, meetingNotes, workItems, customers, onWorkItemUpdate, onWorkItemCreate }: { memberId: string; onNavigate: (page: string, id?: string) => void; team: TeamMember[]; memberScope: Record<string, ViewScope>; meetingNotes: MeetingNoteItem[]; workItems: WorkItemDB[]; customers: CustomerDB[]; onWorkItemUpdate: (id: string, patch: Record<string, unknown>) => void; onWorkItemCreate: (memberId: string, fields: { title: string; customerId?: string | null; priority?: string }) => void }) {
+  const [showAddForm, setShowAddForm] = useState(false);
+  const [newTitle, setNewTitle] = useState("");
+  const [newCustomerId, setNewCustomerId] = useState<string>("");
+  const [newPriority, setNewPriority] = useState("Medium");
+  const member = team.find((t) => t.id === memberId);
+  const items = workItems.filter((w) => w.memberId === memberId);
+  const notes = meetingNotes.filter((n) => n.memberId === memberId);
+  const isLeadership = memberScope[memberId] === "leadership";
+
+  const handleSubmitNew = () => {
+    if (!newTitle.trim()) return;
+    onWorkItemCreate(memberId, {
+      title: newTitle.trim(),
+      customerId: newCustomerId || null,
+      priority: newPriority,
+    });
+    setNewTitle("");
+    setNewCustomerId("");
+    setNewPriority("Medium");
+    setShowAddForm(false);
+  };
+
   if (!member) return null;
   return (
     <div style={isLeadership ? { background: "#F5F3FF", margin: "-24px -32px", padding: "24px 32px", minHeight: "100vh" } : undefined}>
@@ -372,9 +494,49 @@ function MemberDetailPage({ memberId, onNavigate }: { memberId: string; onNaviga
         <div style={styles.card}>
           <div style={styles.cardHeader}>
             <span style={styles.cardTitle}>Work Items ({items.length})</span>
+            <button
+              style={{ ...btn(false), padding: "4px 10px", fontSize: 12, gap: 4 }}
+              onClick={() => setShowAddForm(!showAddForm)}
+            >
+              <Plus size={12} /> Add
+            </button>
           </div>
-          {items.map((item) => <WorkItemRow key={item.id} item={item} />)}
-          {items.length === 0 && <div style={{ padding: 20, textAlign: "center", color: V.muted, fontSize: 13 }}>No work items</div>}
+          {showAddForm && (
+            <div style={{ padding: "12px 20px", borderBottom: `1px solid ${V.border}`, background: "#FAFAFA" }}>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  autoFocus
+                  type="text"
+                  value={newTitle}
+                  onChange={(e) => setNewTitle(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") handleSubmitNew();
+                    if (e.key === "Escape") { setShowAddForm(false); setNewTitle(""); }
+                  }}
+                  placeholder="Work item title..."
+                  style={{ flex: 1, padding: "6px 10px", fontSize: 13, border: `1px solid ${V.border}`, borderRadius: 6, outline: "none" }}
+                />
+                <select
+                  value={newCustomerId}
+                  onChange={(e) => setNewCustomerId(e.target.value)}
+                  style={{ padding: "6px 8px", fontSize: 12, border: `1px solid ${V.border}`, borderRadius: 6 }}
+                >
+                  <option value="">No customer</option>
+                  {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                <select
+                  value={newPriority}
+                  onChange={(e) => setNewPriority(e.target.value)}
+                  style={{ padding: "6px 8px", fontSize: 12, border: `1px solid ${V.border}`, borderRadius: 6 }}
+                >
+                  {["Critical", "High", "Medium", "Low"].map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+                <button style={{ ...btn(true), padding: "6px 12px", fontSize: 12 }} onClick={handleSubmitNew}>Add</button>
+              </div>
+            </div>
+          )}
+          {items.map((item) => <WorkItemRow key={item.id} item={item} team={team} onUpdate={onWorkItemUpdate} customers={customers} />)}
+          {items.length === 0 && !showAddForm && <div style={{ padding: 20, textAlign: "center", color: V.muted, fontSize: 13 }}>No work items</div>}
         </div>
         <div style={styles.card}>
           <div style={styles.cardHeader}>
@@ -389,12 +551,125 @@ function MemberDetailPage({ memberId, onNavigate }: { memberId: string; onNaviga
   );
 }
 
-function OneOnOnePage({ memberId, onNavigate }: { memberId: string; onNavigate: (page: string, id?: string) => void }) {
-  const member = TEAM.find((t) => t.id === memberId);
-  const notes = MEETING_NOTES.filter((n) => n.memberId === memberId);
-  const items = WORK_ITEMS.filter((w) => w.memberId === memberId);
-  const openActions = notes.flatMap((n) => n.actionItems.filter((a) => !a.done).map((a) => ({ ...a, from: n.title, date: n.date })));
-  const isLeadership = MEMBER_SCOPE[memberId] === "leadership";
+function ActionItemRow({ item, onToggle, onComment }: { item: ActionItemDB; onToggle: (id: string, done: boolean) => void; onComment: (id: string, comment: string) => void }) {
+  const [showComment, setShowComment] = useState(false);
+  const [commentText, setCommentText] = useState(item.comment || "");
+  const [saving, setSaving] = useState(false);
+
+  const handleSaveComment = () => {
+    if (commentText !== (item.comment || "")) {
+      onComment(item.id, commentText);
+    }
+    setShowComment(false);
+  };
+
+  return (
+    <div style={{ padding: "10px 0", borderBottom: `1px solid ${V.border}` }}>
+      <div style={{ display: "flex", alignItems: "flex-start", gap: 8 }}>
+        <div
+          style={{ cursor: "pointer", marginTop: 2, flexShrink: 0, opacity: saving ? 0.5 : 1 }}
+          onClick={async () => {
+            setSaving(true);
+            await onToggle(item.id, !item.done);
+            setSaving(false);
+          }}
+        >
+          {item.done
+            ? <CheckCircle2 size={16} color={V.success} />
+            : <Circle size={16} color={V.muted} />}
+        </div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: 13, color: item.done ? V.muted : V.copy, textDecoration: item.done ? "line-through" : "none" }}>
+            {item.text}
+          </div>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 2 }}>
+            <span style={{ fontSize: 11, color: V.muted }}>from {item.noteTitle} · {item.noteDate}</span>
+            {item.assignee && <span style={{ ...badge("#F4F4F5", V.muted), fontSize: 10 }}>{item.assignee}</span>}
+          </div>
+          {item.comment && !showComment && (
+            <div style={{ fontSize: 12, color: V.muted, marginTop: 4, fontStyle: "italic", padding: "4px 8px", background: "#F9FAFB", borderRadius: 4 }}>
+              {item.comment}
+            </div>
+          )}
+        </div>
+        <button
+          style={{ background: "none", border: "none", cursor: "pointer", color: V.muted, padding: 2, flexShrink: 0 }}
+          onClick={() => setShowComment(!showComment)}
+          title="Add comment"
+        >
+          <MessageCircle size={14} />
+        </button>
+      </div>
+      {showComment && (
+        <div style={{ display: "flex", gap: 8, marginTop: 8, marginLeft: 24 }}>
+          <input
+            type="text"
+            value={commentText}
+            onChange={(e) => setCommentText(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") handleSaveComment(); if (e.key === "Escape") setShowComment(false); }}
+            placeholder="Add a note (reason, context...)"
+            style={{ flex: 1, padding: "6px 10px", fontSize: 12, border: `1px solid ${V.border}`, borderRadius: 6, outline: "none" }}
+            autoFocus
+          />
+          <button style={{ ...btn(true), fontSize: 12, padding: "5px 12px" }} onClick={handleSaveComment}>Save</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function OneOnOnePage({ memberId, onNavigate, team, memberScope, meetingNotes, actionItems, setActionItems, workItems, customers, onWorkItemUpdate }: { memberId: string; onNavigate: (page: string, id?: string) => void; team: TeamMember[]; memberScope: Record<string, ViewScope>; meetingNotes: MeetingNoteItem[]; actionItems: ActionItemDB[]; setActionItems: React.Dispatch<React.SetStateAction<ActionItemDB[]>>; workItems: WorkItemDB[]; customers: CustomerDB[]; onWorkItemUpdate: (id: string, patch: Record<string, unknown>) => void }) {
+  const [showClosed, setShowClosed] = useState(false);
+  const member = team.find((t) => t.id === memberId);
+  const notes = meetingNotes.filter((n) => n.memberId === memberId);
+  const items = workItems.filter((w) => w.memberId === memberId);
+  const isLeadership = memberScope[memberId] === "leadership";
+
+  // Get meeting note UUIDs for this member
+  const memberNoteIds = new Set(notes.map((n) => n.id));
+
+  // Filter action items to this member's meeting notes
+  const memberActions = actionItems.filter((a) => memberNoteIds.has(a.meeting_note_id));
+  const openActions = memberActions.filter((a) => !a.done);
+  const closedActions = memberActions.filter((a) => a.done);
+
+  // Fallback: if no DB action items, derive from JSON (mock data path)
+  const fallbackOpenActions = memberActions.length === 0
+    ? notes.flatMap((n) => n.actionItems.filter((a) => !a.done).map((a) => ({ ...a, from: n.title, date: n.date })))
+    : [];
+  const hasDBActions = memberActions.length > 0;
+
+  const handleToggle = async (id: string, done: boolean) => {
+    try {
+      const res = await fetch(`/api/action-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ done }),
+      });
+      if (res.ok) {
+        const updated = await res.json();
+        setActionItems((prev) => prev.map((a) => a.id === id ? { ...a, done: updated.done, closed_at: updated.closedAt || updated.closed_at } : a));
+      }
+    } catch (err) {
+      console.error("Failed to toggle action item:", err);
+    }
+  };
+
+  const handleComment = async (id: string, comment: string) => {
+    try {
+      const res = await fetch(`/api/action-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment }),
+      });
+      if (res.ok) {
+        setActionItems((prev) => prev.map((a) => a.id === id ? { ...a, comment: comment || null } : a));
+      }
+    } catch (err) {
+      console.error("Failed to save comment:", err);
+    }
+  };
+
   if (!member) return null;
   return (
     <div style={isLeadership ? { background: "#F5F3FF", margin: "-24px -32px", padding: "24px 32px", minHeight: "100vh" } : undefined}>
@@ -458,26 +733,51 @@ function OneOnOnePage({ memberId, onNavigate }: { memberId: string; onNavigate: 
       <div style={styles.grid2}>
         <div style={styles.card}>
           <div style={styles.cardHeader}>
-            <span style={styles.cardTitle}>Open Action Items ({openActions.length})</span>
+            <span style={styles.cardTitle}>Open Action Items ({hasDBActions ? openActions.length : fallbackOpenActions.length})</span>
           </div>
           <div style={{ padding: "8px 20px" }}>
-            {openActions.map((a, i) => (
-              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: i < openActions.length - 1 ? `1px solid ${V.border}` : "none" }}>
-                <Circle size={14} color={V.muted} style={{ marginTop: 2, flexShrink: 0 }} />
-                <div>
-                  <div style={{ fontSize: 13, color: V.copy }}>{a.text}</div>
-                  <div style={{ fontSize: 11, color: V.muted }}>from {a.from} · {a.date}</div>
-                </div>
-              </div>
-            ))}
-            {openActions.length === 0 && <div style={{ padding: "12px 0", textAlign: "center", color: V.muted, fontSize: 13 }}>All caught up</div>}
+            {hasDBActions ? (
+              <>
+                {openActions.map((a) => (
+                  <ActionItemRow key={a.id} item={a} onToggle={handleToggle} onComment={handleComment} />
+                ))}
+                {openActions.length === 0 && <div style={{ padding: "12px 0", textAlign: "center", color: V.muted, fontSize: 13 }}>All caught up</div>}
+                {closedActions.length > 0 && (
+                  <div style={{ marginTop: 12 }}>
+                    <button
+                      style={{ background: "none", border: "none", cursor: "pointer", color: V.muted, fontSize: 12, display: "flex", alignItems: "center", gap: 4, padding: "4px 0" }}
+                      onClick={() => setShowClosed(!showClosed)}
+                    >
+                      {showClosed ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                      {showClosed ? "Hide" : "Show"} closed ({closedActions.length})
+                    </button>
+                    {showClosed && closedActions.map((a) => (
+                      <ActionItemRow key={a.id} item={a} onToggle={handleToggle} onComment={handleComment} />
+                    ))}
+                  </div>
+                )}
+              </>
+            ) : (
+              <>
+                {fallbackOpenActions.map((a, i) => (
+                  <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 8, padding: "8px 0", borderBottom: i < fallbackOpenActions.length - 1 ? `1px solid ${V.border}` : "none" }}>
+                    <Circle size={14} color={V.muted} style={{ marginTop: 2, flexShrink: 0 }} />
+                    <div>
+                      <div style={{ fontSize: 13, color: V.copy }}>{a.text}</div>
+                      <div style={{ fontSize: 11, color: V.muted }}>from {a.from} · {a.date}</div>
+                    </div>
+                  </div>
+                ))}
+                {fallbackOpenActions.length === 0 && <div style={{ padding: "12px 0", textAlign: "center", color: V.muted, fontSize: 13 }}>All caught up</div>}
+              </>
+            )}
           </div>
         </div>
         <div style={styles.card}>
           <div style={styles.cardHeader}>
             <span style={styles.cardTitle}>Current Work Context</span>
           </div>
-          {items.map((item) => <WorkItemRow key={item.id} item={item} />)}
+          {items.map((item) => <WorkItemRow key={item.id} item={item} team={team} onUpdate={onWorkItemUpdate} customers={customers} />)}
         </div>
       </div>
 
@@ -492,15 +792,15 @@ function OneOnOnePage({ memberId, onNavigate }: { memberId: string; onNavigate: 
   );
 }
 
-function OneOnOneListPage({ onNavigate, scope = "team" }: { onNavigate: (page: string, id?: string) => void; scope?: ViewScope }) {
-  const team = getTeamForScope(scope);
+function OneOnOneListPage({ onNavigate, scope = "team", team: allTeam, memberScope, meetingNotes }: { onNavigate: (page: string, id?: string) => void; scope?: ViewScope; team: TeamMember[]; memberScope: Record<string, ViewScope>; meetingNotes: MeetingNoteItem[] }) {
+  const team = getTeamForScope(allTeam, memberScope, scope);
   return (
     <div>
       <div style={styles.pageTitle}>1:1 Meetings</div>
       <div style={styles.pageSubtitle}>Prepare for and review 1:1 meetings with your {scope === "leadership" ? "leadership team" : "team"}</div>
       <div style={styles.grid3}>
         {team.map((m) => {
-          const notes = MEETING_NOTES.filter((n) => n.memberId === m.id);
+          const notes = meetingNotes.filter((n) => n.memberId === m.id);
           const openActions = notes.flatMap((n) => n.actionItems.filter((a) => !a.done));
           const lastNote = notes[0];
           return (
@@ -528,8 +828,8 @@ function OneOnOneListPage({ onNavigate, scope = "team" }: { onNavigate: (page: s
   );
 }
 
-function BlockerPage({ scope = "team" }: { scope?: ViewScope }) {
-  const workItems = getWorkItemsForScope(scope);
+function BlockerPage({ scope = "team", team, memberScope, workItems: allWorkItems, customers, onWorkItemUpdate }: { scope?: ViewScope; team: TeamMember[]; memberScope: Record<string, ViewScope>; workItems: WorkItemDB[]; customers: CustomerDB[]; onWorkItemUpdate: (id: string, patch: Record<string, unknown>) => void }) {
+  const workItems = getWorkItemsForScope(allWorkItems, memberScope, scope);
   const blockers = workItems.filter((w) => w.isBlocker);
   const stale = workItems.filter((w) => w.daysInStatus >= 7 && !w.isBlocker && w.status !== "Done");
   const isLeadership = scope === "leadership";
@@ -543,7 +843,7 @@ function BlockerPage({ scope = "team" }: { scope?: ViewScope }) {
             <AlertTriangle size={14} /> Active Blockers ({blockers.length})
           </span>
         </div>
-        {blockers.map((item) => <WorkItemRow key={item.id} item={item} showMember />)}
+        {blockers.map((item) => <WorkItemRow key={item.id} item={item} showMember team={team} onUpdate={onWorkItemUpdate} customers={customers} />)}
         {blockers.length === 0 && <div style={{ padding: 24, textAlign: "center", color: V.success, fontSize: 14 }}>No active blockers</div>}
       </div>
       <div style={styles.card}>
@@ -552,24 +852,26 @@ function BlockerPage({ scope = "team" }: { scope?: ViewScope }) {
             <Clock size={14} /> Stale Items — 7+ days in status ({stale.length})
           </span>
         </div>
-        {stale.map((item) => <WorkItemRow key={item.id} item={item} showMember />)}
+        {stale.map((item) => <WorkItemRow key={item.id} item={item} showMember team={team} onUpdate={onWorkItemUpdate} customers={customers} />)}
         {stale.length === 0 && <div style={{ padding: 24, textAlign: "center", color: V.success, fontSize: 14 }}>Nothing stale</div>}
       </div>
     </div>
   );
 }
 
-function CustomerPage({ onNavigate, scope = "team" }: { onNavigate: (page: string, id?: string) => void; scope?: ViewScope }) {
-  const customers = getCustomersForScope(scope);
-  const workItems = getWorkItemsForScope(scope);
+function CustomerPage({ onNavigate, scope = "team", team, memberScope, workItems: allWorkItems, customers: allCustomers, onWorkItemUpdate, onCustomerCreate, onCustomerDelete }: { onNavigate: (page: string, id?: string) => void; scope?: ViewScope; team: TeamMember[]; memberScope: Record<string, ViewScope>; workItems: WorkItemDB[]; customers: CustomerDB[]; onWorkItemUpdate: (id: string, patch: Record<string, unknown>) => void; onCustomerCreate?: (name: string) => void; onCustomerDelete?: (id: string) => void }) {
+  const customers = getCustomersForScope(allCustomers, allWorkItems, memberScope, scope);
+  const workItems = getWorkItemsForScope(allWorkItems, memberScope, scope);
   const isLeadership = scope === "leadership";
+  const [addingCustomer, setAddingCustomer] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState("");
   return (
     <div style={isLeadership ? { background: "#F5F3FF", margin: "-24px -32px", padding: "24px 32px", minHeight: "100vh" } : undefined}>
       <div style={styles.pageTitle}>Customer Engagements</div>
       <div style={styles.pageSubtitle}>Work organized by customer{isLeadership ? " — leadership scope" : " across the team"}</div>
       {customers.map((cust) => {
-        const members = TEAM.filter((m) => cust.members.includes(m.id));
-        const items = workItems.filter((w) => w.customer === cust.name);
+        const members = team.filter((m) => cust.members.includes(m.id));
+        const items = workItems.filter((w) => w.customerName === cust.name);
         const blockers = items.filter((w) => w.isBlocker);
         return (
           <div key={cust.id} style={{ ...styles.card, marginBottom: 16 }}>
@@ -580,27 +882,85 @@ function CustomerPage({ onNavigate, scope = "team" }: { onNavigate: (page: strin
                 {cust.status === "discovery" && <span style={badge(V.warningBg, V.warning)}>Discovery</span>}
                 {blockers.length > 0 && <span style={badge(V.dangerBg, V.danger)}>{blockers.length} blocker{blockers.length > 1 ? "s" : ""}</span>}
               </div>
-              <div style={{ display: "flex" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                 {members.map((m) => <div key={m.id} style={{ ...avatar(28), marginLeft: -6, border: `2px solid ${V.card}`, cursor: "pointer" }} title={m.name} onClick={() => onNavigate("member", m.id)}>{m.avatar}</div>)}
+                {onCustomerDelete && <button onClick={() => { if (window.confirm(`Delete customer "${cust.name}"? Work items will lose their customer assignment.`)) onCustomerDelete(cust.id); }} style={{ background: "none", border: "none", cursor: "pointer", padding: 4, borderRadius: 4, display: "flex", alignItems: "center", color: V.muted }} title="Delete customer"><X size={14} /></button>}
               </div>
             </div>
-            {items.map((item) => <WorkItemRow key={item.id} item={item} showMember />)}
+            {items.map((item) => <WorkItemRow key={item.id} item={item} showMember team={team} onUpdate={onWorkItemUpdate} customers={allCustomers} />)}
             {items.length === 0 && <div style={{ padding: 16, textAlign: "center", color: V.muted, fontSize: 13 }}>No tracked items yet</div>}
           </div>
         );
       })}
+      {onCustomerCreate && !addingCustomer && (
+        <div onClick={() => setAddingCustomer(true)} style={{ ...styles.card, padding: 20, border: `2px dashed ${V.border}`, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", minHeight: 80, cursor: "pointer", marginBottom: 16 }}>
+          <div style={{ fontSize: 24, color: V.muted, marginBottom: 4 }}>+</div>
+          <div style={{ fontSize: 13, fontWeight: 600, color: V.muted }}>Add Customer</div>
+        </div>
+      )}
+      {onCustomerCreate && addingCustomer && (
+        <div style={{ ...styles.card, padding: 16, marginBottom: 16 }}>
+          <input
+            autoFocus
+            placeholder="Customer name..."
+            value={newCustomerName}
+            onChange={(e) => setNewCustomerName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && newCustomerName.trim()) {
+                onCustomerCreate(newCustomerName.trim());
+                setNewCustomerName("");
+                setAddingCustomer(false);
+              }
+              if (e.key === "Escape") {
+                setNewCustomerName("");
+                setAddingCustomer(false);
+              }
+            }}
+            style={{ width: "100%", padding: "8px 12px", border: `1px solid ${V.border}`, borderRadius: 6, fontSize: 14, outline: "none", boxSizing: "border-box" }}
+          />
+          <div style={{ fontSize: 12, color: V.muted, marginTop: 6 }}>Press Enter to add, Escape to cancel</div>
+        </div>
+      )}
     </div>
   );
 }
 
 function ConnectorsPage() {
+  const [syncing, setSyncing] = useState<string | null>(null);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  const handleSync = async (connId: string, connType: string) => {
+    if (connType !== "granola") return;
+    setSyncing(connId);
+    setSyncResult(null);
+    try {
+      const res = await fetch("/api/sync/granola", { method: "POST" });
+      const data = await res.json();
+      if (data.success) {
+        setSyncResult(`Synced ${data.rowsUpserted} notes (${data.skipped} skipped)`);
+      } else {
+        setSyncResult(`Error: ${data.error}`);
+      }
+    } catch (err) {
+      setSyncResult(`Sync failed: ${(err as Error).message}`);
+    } finally {
+      setSyncing(null);
+    }
+  };
+
   return (
     <div>
       <div style={styles.pageTitle}>Connectors</div>
       <div style={styles.pageSubtitle}>Manage data sources — add new integrations without code changes</div>
+      {syncResult && (
+        <div style={{ padding: "10px 16px", marginBottom: 16, borderRadius: 8, background: syncResult.startsWith("Error") ? V.dangerBg : V.successBg, color: syncResult.startsWith("Error") ? V.danger : V.success, fontSize: 13 }}>
+          {syncResult}
+        </div>
+      )}
       <div style={styles.grid3}>
         {CONNECTORS.map((conn) => {
           const s = connectorStatusStyle(conn.status);
+          const isSyncing = syncing === conn.id;
           return (
             <div key={conn.id} style={{ ...styles.card, padding: 20 }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 12 }}>
@@ -611,10 +971,13 @@ function ConnectorsPage() {
               {conn.lastSync && <div style={{ fontSize: 12, color: V.muted }}>Last sync: {conn.lastSync} · {conn.itemCount} items</div>}
               {!conn.lastSync && <div style={{ fontSize: 12, color: V.muted }}>Not yet connected</div>}
               <div style={{ marginTop: 12 }}>
-                {conn.status === "active" && <button style={btn(false)}>↻ Sync Now</button>}
+                {(conn.status === "active" || conn.status === "configured") && (
+                  <button style={btn(false)} onClick={() => handleSync(conn.id, conn.type)} disabled={isSyncing}>
+                    {isSyncing ? "Syncing..." : "↻ Sync Now"}
+                  </button>
+                )}
                 {conn.status === "pending" && <button style={btn(true)}>Configure</button>}
                 {conn.status === "planned" && <button style={{ ...btn(false), opacity: 0.5 }}>Coming Soon</button>}
-                {conn.status === "configured" && <button style={btn(false)}>↻ Sync Now</button>}
               </div>
             </div>
           );
@@ -645,12 +1008,313 @@ export default function Page() {
   const [page, setPage] = useState("dashboard");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(null);
+  const [team, setTeam] = useState<TeamMember[]>([]);
+  const [memberScope, setMemberScope] = useState<Record<string, ViewScope>>({});
+  const [meetingNotes, setMeetingNotes] = useState<MeetingNoteItem[]>([]);
+  const [actionItems, setActionItems] = useState<ActionItemDB[]>([]);
+  const [workItems, setWorkItems] = useState<WorkItemDB[]>([]);
+  const [customers, setCustomers] = useState<CustomerDB[]>([]);
   const router = useRouter();
+
+  // Derive member-customer assignments from work items
+  const memberCustomers = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const w of workItems) {
+      if (!w.customerName) continue;
+      if (!map[w.memberId]) map[w.memberId] = [];
+      if (!map[w.memberId].includes(w.customerName)) map[w.memberId].push(w.customerName);
+    }
+    return map;
+  }, [workItems]);
 
   useEffect(() => {
     const supabase = createClient();
     supabase.auth.getUser().then(({ data }) => setUser(data.user));
+
+    // Fetch team roster from Supabase
+    supabase.from("team_members").select("id, name, email, role, view_scope").then(({ data }) => {
+      if (!data) return;
+
+      // Build UUID-to-legacy lookup for work items
+      const uuidToLegacy: Record<string, string> = {};
+      data.forEach((row) => {
+        const legacyId = EMAIL_TO_LEGACY_ID[row.email];
+        if (legacyId) uuidToLegacy[row.id] = legacyId;
+      });
+
+      const members: TeamMember[] = data.map((row) => {
+        const legacyId = EMAIL_TO_LEGACY_ID[row.email] || row.id;
+        const initials = row.name.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase();
+        return {
+          id: legacyId,
+          name: row.name,
+          email: row.email,
+          role: row.role || "Engineer",
+          avatar: initials,
+          customers: [], // derived from workItems via memberCustomers memo
+          oneOnOneCount: 0,
+        };
+      });
+      setTeam(members);
+
+      const scope: Record<string, ViewScope> = {};
+      members.forEach((m) => {
+        const row = data.find((r) => (EMAIL_TO_LEGACY_ID[r.email] || r.id) === m.id);
+        scope[m.id] = (row?.view_scope === "leadership" ? "leadership" : "team") as ViewScope;
+      });
+      setMemberScope(scope);
+
+      // Fetch customers from Supabase
+      supabase.from("customers").select("id, name, connection_status").then(({ data: custData }) => {
+        if (custData && custData.length > 0) {
+          setCustomers(custData.map((c: any) => ({ id: c.id, name: c.name, connectionStatus: c.connection_status })));
+        }
+      });
+
+      // Fetch work items from Supabase with customer join
+      supabase
+        .from("work_items")
+        .select("id, source, source_id, team_member_id, customer_id, title, status, priority, is_blocker, blocker_description, updated_at, customers(name)")
+        .then(({ data: wiData }) => {
+          if (wiData && wiData.length > 0) {
+            const mapped: WorkItemDB[] = wiData.map((row: any) => {
+              const legacyMemberId = uuidToLegacy[row.team_member_id] || row.team_member_id;
+              const now = Date.now();
+              const updatedAt = new Date(row.updated_at).getTime();
+              const daysInStatus = Math.max(0, Math.floor((now - updatedAt) / 86400000));
+              return {
+                id: row.id,
+                source: row.source,
+                memberId: legacyMemberId,
+                customerId: row.customer_id,
+                customerName: row.customers?.name || "",
+                title: row.title,
+                status: row.status || "To Do",
+                priority: row.priority || "Medium",
+                isBlocker: row.is_blocker || false,
+                blockerDescription: row.blocker_description || null,
+                daysInStatus,
+              };
+            });
+            setWorkItems(mapped);
+          }
+        });
+
+      // Fetch meeting notes from Supabase — fall back to mock data if empty
+      supabase
+        .from("meeting_notes")
+        .select("id, team_member_id, title, meeting_date, source, summary, action_items, key_topics")
+        .order("meeting_date", { ascending: false })
+        .limit(100)
+        .then(({ data: notesData }) => {
+          if (notesData && notesData.length > 0) {
+            const mapped: MeetingNoteItem[] = notesData.map((row: any) => {
+              const member = members.find((m) =>
+                data!.some(
+                  (d: any) => d.id === row.team_member_id && (EMAIL_TO_LEGACY_ID[d.email] || d.id) === m.id
+                )
+              );
+              return {
+                id: row.id,
+                memberId: member?.id || row.team_member_id,
+                title: row.title,
+                date: row.meeting_date?.slice(0, 10) || "",
+                source: row.source || "granola",
+                topics: Array.isArray(row.key_topics) ? row.key_topics : [],
+                actionItems: Array.isArray(row.action_items)
+                  ? row.action_items.map((a: any) => ({ text: a.text || "", done: !!a.done }))
+                  : [],
+                summary: row.summary || "",
+              };
+            });
+            setMeetingNotes(mapped);
+
+            // Fetch action items from the dedicated table
+            supabase
+              .from("action_items")
+              .select("id, meeting_note_id, text, assignee, done, comment, closed_at, created_at")
+              .order("created_at", { ascending: true })
+              .then(({ data: aiData }) => {
+                if (aiData && aiData.length > 0) {
+                  const noteMap = new Map(notesData.map((n: any) => [n.id, n]));
+                  const enriched: ActionItemDB[] = aiData.map((row: any) => {
+                    const note = noteMap.get(row.meeting_note_id) as any;
+                    return {
+                      ...row,
+                      noteTitle: note?.title || "",
+                      noteDate: note?.meeting_date?.slice(0, 10) || "",
+                    };
+                  });
+                  setActionItems(enriched);
+                }
+              });
+          } else {
+            setMeetingNotes(MOCK_MEETING_NOTES);
+          }
+        });
+    });
   }, []);
+
+  // Optimistic work item update with server sync
+  const handleWorkItemUpdate = async (id: string, patch: Record<string, unknown>) => {
+    // Optimistic update
+    setWorkItems((prev) => prev.map((w) => {
+      if (w.id !== id) return w;
+      const updated = { ...w, ...patch };
+      // If customer changed, resolve name
+      if ("customerId" in patch) {
+        const cust = customers.find((c) => c.id === patch.customerId);
+        updated.customerName = cust?.name || "";
+      }
+      // Clear blocker description when blocker is removed
+      if (patch.isBlocker === false) {
+        updated.blockerDescription = null;
+      }
+      return updated;
+    }));
+
+    try {
+      const res = await fetch(`/api/work-items/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (res.ok) {
+        const serverData = await res.json();
+        setWorkItems((prev) => prev.map((w) => {
+          if (w.id !== id) return w;
+          return {
+            ...w,
+            title: serverData.title || w.title,
+            status: serverData.status || w.status,
+            priority: serverData.priority || w.priority,
+            isBlocker: serverData.is_blocker ?? serverData.isBlocker ?? w.isBlocker,
+            blockerDescription: serverData.blocker_description ?? serverData.blockerDescription ?? w.blockerDescription,
+            customerId: serverData.customer_id ?? serverData.customerId ?? w.customerId,
+            customerName: serverData.customer?.name || w.customerName,
+          };
+        }));
+      }
+    } catch (err) {
+      console.error("Failed to update work item:", err);
+    }
+  };
+
+  // Create a new work item via POST API
+  const handleWorkItemCreate = async (
+    legacyMemberId: string,
+    fields: { title: string; customerId?: string | null; priority?: string }
+  ) => {
+    // Reverse-lookup: legacy ID → UUID via EMAIL_TO_LEGACY_ID
+    const memberEmail = Object.entries(EMAIL_TO_LEGACY_ID).find(
+      ([, lid]) => lid === legacyMemberId
+    )?.[0];
+    // Find the DB row whose email matches to get the UUID
+    const dbRow = team.find((t) => t.email === memberEmail);
+    // If the member wasn't from legacy mapping, assume legacyMemberId IS the UUID
+    const teamMemberId = memberEmail && dbRow
+      ? (() => {
+          // We need the actual UUID — stored nowhere on TeamMember (it uses legacy id).
+          // Re-derive from the Supabase fetch: we stored legacy id as member.id,
+          // so we need to go the other way.  But we can look it up by email.
+          // Since we don't persist UUIDs in state, fetch it on demand.
+          return null; // will be resolved below
+        })()
+      : legacyMemberId;
+
+    // Resolve UUID from email by querying Supabase directly
+    let resolvedUuid = teamMemberId;
+    if (!resolvedUuid && memberEmail) {
+      const { createClient } = await import("@/lib/supabase/client");
+      const supabase = createClient();
+      const { data } = await supabase
+        .from("team_members")
+        .select("id")
+        .eq("email", memberEmail)
+        .single();
+      if (data) resolvedUuid = data.id;
+    }
+
+    if (!resolvedUuid) {
+      console.error("Could not resolve team member UUID for", legacyMemberId);
+      return;
+    }
+
+    try {
+      const res = await fetch("/api/work-items", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: fields.title,
+          teamMemberId: resolvedUuid,
+          customerId: fields.customerId || null,
+          priority: fields.priority || "Medium",
+        }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        const newItem: WorkItemDB = {
+          id: created.id,
+          source: "manual",
+          memberId: legacyMemberId,
+          customerId: created.customerId || created.customer_id || null,
+          customerName: created.customer?.name || "",
+          title: created.title,
+          status: created.status || "To Do",
+          priority: created.priority || "Medium",
+          isBlocker: false,
+          blockerDescription: null,
+          daysInStatus: 0,
+        };
+        setWorkItems((prev) => [newItem, ...prev]);
+      } else {
+        const err = await res.json();
+        console.error("Failed to create work item:", err.error);
+      }
+    } catch (err) {
+      console.error("Failed to create work item:", err);
+    }
+  };
+
+  const handleCustomerCreate = async (name: string) => {
+    try {
+      const res = await fetch("/api/customers", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name }),
+      });
+      if (res.ok) {
+        const created = await res.json();
+        setCustomers((prev) => [...prev, {
+          id: created.id,
+          name: created.name,
+          connectionStatus: created.connectionStatus || created.connection_status || "pending",
+        }]);
+      } else {
+        const err = await res.json();
+        console.error("Failed to create customer:", err.error);
+      }
+    } catch (err) {
+      console.error("Failed to create customer:", err);
+    }
+  };
+
+  const handleCustomerDelete = async (id: string) => {
+    try {
+      const res = await fetch(`/api/customers/${id}`, { method: "DELETE" });
+      if (res.ok) {
+        setCustomers((prev) => prev.filter((c) => c.id !== id));
+        setWorkItems((prev) => prev.map((w) =>
+          w.customerId === id ? { ...w, customerId: null, customerName: "" } : w
+        ));
+      } else {
+        const err = await res.json();
+        console.error("Failed to delete customer:", err.error);
+      }
+    } catch (err) {
+      console.error("Failed to delete customer:", err);
+    }
+  };
 
   const handleSignOut = async () => {
     const supabase = createClient();
@@ -663,25 +1327,37 @@ export default function Page() {
     setSelectedId(id || null);
   };
 
-  const teamBlockerCount = getWorkItemsForScope("team").filter((w) => w.isBlocker).length;
-  const leadershipBlockerCount = getWorkItemsForScope("leadership").filter((w) => w.isBlocker).length;
+  const isLocalhost = typeof window !== "undefined" && window.location.hostname === "localhost";
+  const viewOverride = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("as") : null;
+  const isManager = viewOverride === "team" && isLocalhost ? false : user?.email === "dwessel@viax.io";
+
+  // Update team member customer tags from derived data
+  const teamWithCustomers = useMemo(() =>
+    team.map((m) => ({ ...m, customers: memberCustomers[m.id] || [] })),
+    [team, memberCustomers]
+  );
+
+  const teamBlockerCount = getWorkItemsForScope(workItems, memberScope, "team").filter((w) => w.isBlocker).length;
+  const leadershipBlockerCount = isManager ? getWorkItemsForScope(workItems, memberScope, "leadership").filter((w) => w.isBlocker).length : 0;
 
   // Determine if current member drill-down is from a leadership member
-  const isLeadershipMemberPage = (page === "member" || page === "oneOnOne") && !!selectedId && MEMBER_SCOPE[selectedId] === "leadership";
+  const isLeadershipMemberPage = (page === "member" || page === "oneOnOne") && !!selectedId && memberScope[selectedId] === "leadership";
+
+  const tp = { team: teamWithCustomers, memberScope, meetingNotes, actionItems, setActionItems, workItems, customers, onWorkItemUpdate: handleWorkItemUpdate, onWorkItemCreate: handleWorkItemCreate, onCustomerCreate: handleCustomerCreate, onCustomerDelete: handleCustomerDelete };
 
   const renderPage = () => {
     switch (page) {
-      case "dashboard": return <DashboardView onNavigate={navigate} />;
-      case "member": return <MemberDetailPage memberId={selectedId!} onNavigate={navigate} />;
-      case "oneOnOne": return <OneOnOnePage memberId={selectedId!} onNavigate={navigate} />;
-      case "oneOnOneList": return <OneOnOneListPage onNavigate={navigate} />;
-      case "blockers": return <BlockerPage />;
-      case "customers": return <CustomerPage onNavigate={navigate} />;
-      case "leadershipDashboard": return <DashboardView onNavigate={navigate} scope="leadership" />;
-      case "leadershipBlockers": return <BlockerPage scope="leadership" />;
-      case "leadershipCustomers": return <CustomerPage onNavigate={navigate} scope="leadership" />;
+      case "dashboard": return <DashboardView onNavigate={navigate} {...tp} />;
+      case "member": return <MemberDetailPage memberId={selectedId!} onNavigate={navigate} {...tp} />;
+      case "oneOnOne": return <OneOnOnePage memberId={selectedId!} onNavigate={navigate} {...tp} />;
+      case "oneOnOneList": return <OneOnOneListPage onNavigate={navigate} {...tp} />;
+      case "blockers": return <BlockerPage {...tp} />;
+      case "customers": return <CustomerPage onNavigate={navigate} {...tp} />;
+      case "leadershipDashboard": return isManager ? <DashboardView onNavigate={navigate} scope="leadership" {...tp} /> : <DashboardView onNavigate={navigate} {...tp} />;
+      case "leadershipBlockers": return isManager ? <BlockerPage scope="leadership" {...tp} /> : <DashboardView onNavigate={navigate} {...tp} />;
+      case "leadershipCustomers": return isManager ? <CustomerPage onNavigate={navigate} scope="leadership" {...tp} /> : <DashboardView onNavigate={navigate} {...tp} />;
       case "connectors": return <ConnectorsPage />;
-      default: return <DashboardView onNavigate={navigate} />;
+      default: return <DashboardView onNavigate={navigate} {...tp} />;
     }
   };
 
@@ -706,21 +1382,25 @@ export default function Page() {
               </div>
             );
           })}
-          <div style={{ ...styles.navSection, display: "flex", alignItems: "center", gap: 4 }}>
-            <Lock size={10} /> Personal
-          </div>
-          {NAV.filter((n) => n.section === "personal").map((n) => {
-            const isActive = page === n.id || (n.id === "leadershipDashboard" && isLeadershipMemberPage);
-            return (
-              <div key={n.id} style={navItem(isActive)} onClick={() => navigate(n.id)}>
-                <n.icon size={16} />
-                <span>{n.label}</span>
-                {n.id === "leadershipBlockers" && leadershipBlockerCount > 0 && (
-                  <span style={{ marginLeft: "auto", background: V.danger, color: "#fff", fontSize: 10, fontWeight: 700, width: 18, height: 18, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>{leadershipBlockerCount}</span>
-                )}
+          {isManager && (
+            <>
+              <div style={{ ...styles.navSection, display: "flex", alignItems: "center", gap: 4 }}>
+                <Lock size={10} /> Personal
               </div>
-            );
-          })}
+              {NAV.filter((n) => n.section === "personal").map((n) => {
+                const isActive = page === n.id || (n.id === "leadershipDashboard" && isLeadershipMemberPage);
+                return (
+                  <div key={n.id} style={navItem(isActive)} onClick={() => navigate(n.id)}>
+                    <n.icon size={16} />
+                    <span>{n.label}</span>
+                    {n.id === "leadershipBlockers" && leadershipBlockerCount > 0 && (
+                      <span style={{ marginLeft: "auto", background: V.danger, color: "#fff", fontSize: 10, fontWeight: 700, width: 18, height: 18, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center" }}>{leadershipBlockerCount}</span>
+                    )}
+                  </div>
+                );
+              })}
+            </>
+          )}
           <div style={styles.navSection}>Admin</div>
           {NAV.filter((n) => n.section === "admin").map((n) => (
             <div key={n.id} style={navItem(page === n.id)} onClick={() => navigate(n.id)}>

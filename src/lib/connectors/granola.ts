@@ -6,108 +6,114 @@ import type {
   NormalizedMeetingNote,
   ConnectorSettingsSchema,
 } from "./types";
+import * as fs from "fs";
+import * as path from "path";
+import { parseMarkdownNote } from "../ingestion/markdown-parser";
 
 /**
- * Granola connector — syncs 1:1 meeting notes.
+ * Granola connector — syncs 1:1 meeting notes from Obsidian vault.
  *
- * Supports two modes:
- * 1. Granola API (primary) — queries the Granola API for meeting notes
- * 2. Obsidian vault (fallback) — reads from local Obsidian vault via REST API
+ * Reads local .md files with YAML frontmatter (exported from Granola),
+ * normalizes them, and returns structured meeting notes for upsert.
  *
- * The connector normalizes notes from either source into the same shape,
- * so the dashboard doesn't care where the data came from.
+ * LLM processing is handled by the sync API route, not here —
+ * this connector handles the file-based data extraction only.
  */
 export const granolaConnector: Connector = {
   type: "granola",
   label: "Granola Meeting Notes",
-  description: "Sync 1:1 meeting notes from Granola and/or Obsidian vault",
+  description: "Sync 1:1 meeting notes from Granola via Obsidian vault",
 
   async testConnection(config: ConnectorConfig): Promise<ConnectionTestResult> {
-    const { mode } = config.settings as { mode: "granola-api" | "obsidian" | "both" };
-
-    // TODO: Replace with actual API calls
-    if (mode === "obsidian" || mode === "both") {
-      try {
-        const res = await fetch("https://127.0.0.1:27124/", {
-          headers: { Authorization: `Bearer ${config.vaultSecretId}` },
-        });
-        if (!res.ok) {
-          return { success: false, message: "Obsidian REST API not reachable" };
-        }
-      } catch {
-        return { success: false, message: "Obsidian REST API not reachable — is Obsidian running?" };
-      }
+    const vaultPath = config.settings.obsidianNotesFolder as string;
+    if (!vaultPath) {
+      return { success: false, message: "Obsidian vault path not configured" };
     }
-
-    return { success: true, message: `Connected in ${mode} mode` };
+    try {
+      const stat = fs.statSync(vaultPath);
+      if (!stat.isDirectory()) {
+        return { success: false, message: "Path is not a directory" };
+      }
+      const files = fs.readdirSync(vaultPath).filter((f) => f.endsWith(".md"));
+      return {
+        success: true,
+        message: `Connected — found ${files.length} notes in vault`,
+        details: { noteCount: files.length },
+      };
+    } catch {
+      return { success: false, message: "Cannot read vault directory — check the path" };
+    }
   },
 
   async sync(config: ConnectorConfig): Promise<SyncResult> {
     const start = Date.now();
     const {
-      mode,
-      teamMemberEmails,
-      managerEmail,
       obsidianNotesFolder,
+      managerEmail,
+      daysBack = 14,
     } = config.settings as {
-      mode: "granola-api" | "obsidian" | "both";
-      teamMemberEmails: string[];
+      obsidianNotesFolder: string;
       managerEmail: string;
-      obsidianNotesFolder?: string;
+      daysBack?: number;
     };
 
     const meetingNotes: NormalizedMeetingNote[] = [];
     const errors: SyncResult["errors"] = [];
 
-    // ── Granola API sync ────────────────────────────────────────
-    if (mode === "granola-api" || mode === "both") {
-      try {
-        // TODO: Replace with actual Granola API calls
-        // The Granola MCP tools provide: list_meetings, get_meetings, query_granola_meetings
-        // In production, call these via the MCP bridge or direct API
-
-        // Pseudocode for the actual implementation:
-        // const meetings = await granolaClient.listMeetings({ timeRange: "last_30_days" });
-        // for (const meeting of meetings) {
-        //   const participants = meeting.known_participants;
-        //   const isOneOnOne = participants.length === 2
-        //     && participants.some(p => p.email === managerEmail);
-        //   if (!isOneOnOne) continue;
-        //   const otherEmail = participants.find(p => p.email !== managerEmail)?.email;
-        //   if (!teamMemberEmails.includes(otherEmail)) continue;
-        //   const details = await granolaClient.getMeeting(meeting.id);
-        //   meetingNotes.push(normalizeGranolaMeeting(details, otherEmail, managerEmail));
-        // }
-      } catch (err) {
-        errors.push({
-          message: `Granola sync failed: ${(err as Error).message}`,
-          recoverable: true,
-        });
-      }
+    if (!obsidianNotesFolder) {
+      return { workItems: [], meetingNotes: [], errors: [{ message: "Vault path not set", recoverable: false }], metadata: { itemsFetched: 0, duration: 0 } };
     }
 
-    // ── Obsidian vault sync ─────────────────────────────────────
-    if (mode === "obsidian" || mode === "both") {
-      try {
-        // TODO: Replace with actual Obsidian REST API calls
-        // GET https://127.0.0.1:27124/vault/{obsidianNotesFolder}/
-        // Parse each note's frontmatter for: date, participants, tags
-        // Extract action items from checkbox patterns: - [ ] and - [x]
+    try {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - daysBack);
+      const cutoff = cutoffDate.toISOString().slice(0, 10);
 
-        // Pseudocode:
-        // const files = await obsidianClient.listFiles(obsidianNotesFolder);
-        // for (const file of files) {
-        //   const content = await obsidianClient.getFile(file.path);
-        //   const { frontmatter, body } = parseMarkdown(content);
-        //   if (!isOneOnOneNote(frontmatter)) continue;
-        //   meetingNotes.push(normalizeObsidianNote(frontmatter, body, file.path));
-        // }
-      } catch (err) {
-        errors.push({
-          message: `Obsidian sync failed: ${(err as Error).message}`,
-          recoverable: true,
-        });
+      const files = fs.readdirSync(obsidianNotesFolder).filter((f) => {
+        if (!f.endsWith(".md")) return false;
+        const dateMatch = f.match(/^(\d{4}-\d{2}-\d{2})/);
+        return dateMatch ? dateMatch[1] >= cutoff : false;
+      });
+
+      for (const file of files) {
+        try {
+          const filePath = path.join(obsidianNotesFolder, file);
+          const raw = fs.readFileSync(filePath, "utf-8");
+          const { frontmatter, body, actionItemsText } = parseMarkdownNote(raw);
+
+          // Build normalized note for each attendee (non-manager)
+          const attendees = frontmatter.attendees
+            .map((a) => a.toLowerCase())
+            .filter((a) => a !== managerEmail?.split("@")[0]?.toLowerCase());
+
+          for (const attendee of attendees) {
+            meetingNotes.push({
+              sourceId: frontmatter.granola_id || file.replace(/\.md$/, ""),
+              source: "granola",
+              sourceUrl: frontmatter.link,
+              teamMemberEmail: `${attendee}@viax.io`, // best-effort email guess
+              managerEmail: managerEmail || "dwessel@viax.io",
+              title: frontmatter.title,
+              meetingDate: new Date(`${frontmatter.date}T${frontmatter.time || "00:00"}:00`),
+              summary: "", // populated by LLM in the sync route
+              actionItems: actionItemsText.map((t) => ({ text: t, done: false })),
+              keyTopics: [],
+              rawContent: body,
+            });
+          }
+        } catch (err) {
+          errors.push({
+            message: `Failed to parse ${file}: ${(err as Error).message}`,
+            itemId: file,
+            recoverable: true,
+          });
+        }
       }
+    } catch (err) {
+      errors.push({
+        message: `Vault read failed: ${(err as Error).message}`,
+        recoverable: false,
+      });
     }
 
     return {
@@ -125,18 +131,6 @@ export const granolaConnector: Connector = {
     return {
       fields: [
         {
-          key: "mode",
-          label: "Data Source",
-          type: "select",
-          required: true,
-          options: [
-            { label: "Granola API", value: "granola-api" },
-            { label: "Obsidian Vault", value: "obsidian" },
-            { label: "Both (Granola primary, Obsidian fallback)", value: "both" },
-          ],
-          default: "both",
-        },
-        {
           key: "managerEmail",
           label: "Manager Email",
           type: "text",
@@ -147,8 +141,16 @@ export const granolaConnector: Connector = {
           key: "obsidianNotesFolder",
           label: "Obsidian Notes Folder",
           type: "text",
+          required: true,
+          description: "Full path to vault meeting notes folder",
+        },
+        {
+          key: "daysBack",
+          label: "Days to Sync",
+          type: "number",
           required: false,
-          description: "Path within your vault where 1:1 notes are stored (e.g., 'Meetings/1-on-1s')",
+          description: "How many days back to sync (default: 14)",
+          default: 14,
         },
       ],
     };
