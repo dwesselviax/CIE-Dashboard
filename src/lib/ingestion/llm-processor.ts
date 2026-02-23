@@ -1,9 +1,10 @@
 import OpenAI from "openai";
 
-const client = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
-  baseURL: "https://api.deepseek.com",
-});
+const getClient = () =>
+  new OpenAI({
+    apiKey: process.env.DEEPSEEK_API_KEY,
+    baseURL: "https://api.deepseek.com",
+  });
 
 export interface LLMResult {
   summary: string;
@@ -29,7 +30,7 @@ Attendees: ${attendeeNames.join(", ")}
 
 ${body}`;
 
-  const response = await client.chat.completions.create({
+  const response = await getClient().chat.completions.create({
     model: "deepseek-chat",
     messages: [
       { role: "system", content: SYSTEM_PROMPT },

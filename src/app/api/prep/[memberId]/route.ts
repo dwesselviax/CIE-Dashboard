@@ -4,10 +4,11 @@ import OpenAI from "openai";
 
 const prisma = new PrismaClient();
 
-const deepseek = new OpenAI({
-  apiKey: process.env.DEEPSEEK_API_KEY,
-  baseURL: "https://api.deepseek.com",
-});
+const getDeepseek = () =>
+  new OpenAI({
+    apiKey: process.env.DEEPSEEK_API_KEY,
+    baseURL: "https://api.deepseek.com",
+  });
 
 export async function GET(
   request: NextRequest,
@@ -98,7 +99,7 @@ Generate a concise 1:1 prep briefing as JSON:
   "workContext": "1-2 sentence summary of their current work status and any concerns"
 }`;
 
-    const response = await deepseek.chat.completions.create({
+    const response = await getDeepseek().chat.completions.create({
       model: "deepseek-chat",
       messages: [{ role: "user", content: prompt }],
       temperature: 0.4,
